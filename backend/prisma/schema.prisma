@@ -1,0 +1,126 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Cabinet comptable
+model Cabinet {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  address   String?
+  city      String?
+  postalCode String?
+
+  // Relations
+  users     User[]
+  clients   Client[]
+  declarations Declaration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Utilisateur du cabinet
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  firstName String
+  lastName  String
+  role      Role     @default(ACCOUNTANT)
+
+  // Relations
+  cabinet    Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  cabinetId  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cabinetId])
+}
+
+enum Role {
+  ADMIN
+  ACCOUNTANT
+  VIEWER
+}
+
+// Client du cabinet
+model Client {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  cin       String?  // Numéro de pièce d'identité
+  rc        String?  // Registre de commerce
+  patente   String?  // Numéro de patente
+  iceNumber String?  // Numéro ICE
+  status    ClientStatus @default(ACTIVE)
+
+  // Relations
+  cabinet    Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  cabinetId  String
+  declarations Declaration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cabinetId])
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+// Déclarations fiscales
+model Declaration {
+  id           String   @id @default(cuid())
+  type         DeclarationType
+  year         Int
+  quarter      Int?     // Pour la TVA
+  status       DeclarationStatus @default(DRAFT)
+
+  // Données fiscales
+  data         Json     // Données flexibles pour différents types de déclarations
+
+  // Relations
+  cabinet      Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  cabinetId    String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId     String
+
+  // Audit
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  submittedAt  DateTime?
+
+  @@index([cabinetId])
+  @@index([clientId])
+  @@unique([clientId, type, year, quarter])
+}
+
+enum DeclarationType {
+  IS      // Impôt sur les sociétés
+  IR      // Impôt sur le revenu
+  TVA     // Taxe sur la valeur ajoutée
+}
+
+enum DeclarationStatus {
+  DRAFT
+  COMPLETED
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
