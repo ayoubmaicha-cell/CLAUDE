@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,37 +7,42 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Cabinet comptable
+// ─── Cabinet comptable ────────────────────────────────────────────────────────
 model Cabinet {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  phone     String?
-  address   String?
-  city      String?
+  id         String  @id @default(cuid())
+  name       String
+  email      String  @unique
+  phone      String?
+  address    String?
+  city       String?
   postalCode String?
+  logo       String?
 
-  // Relations
-  users     User[]
-  clients   Client[]
-  declarations Declaration[]
+  users          User[]
+  clients        Client[]
+  obligationRefs ObligationRef[]
+  invoices       Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// Utilisateur du cabinet
+// ─── Utilisateurs du cabinet ──────────────────────────────────────────────────
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
+  id        String @id @default(cuid())
+  email     String @unique
   password  String
   firstName String
   lastName  String
-  role      Role     @default(ACCOUNTANT)
+  role      Role   @default(COLLABORATOR)
+  phone     String?
+  isActive  Boolean @default(true)
 
-  // Relations
-  cabinet    Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
-  cabinetId  String
+  cabinet   Cabinet @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  cabinetId String
+
+  clients        Client[]           // clients assignés
+  clientObligations ClientObligation[] // obligations traitées
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -50,77 +52,250 @@ model User {
 
 enum Role {
   ADMIN
-  ACCOUNTANT
+  COLLABORATOR
   VIEWER
 }
 
-// Client du cabinet
+// ─── Client du cabinet ────────────────────────────────────────────────────────
 model Client {
-  id        String   @id @default(cuid())
-  firstName String
-  lastName  String
-  email     String?
-  phone     String?
-  cin       String?  // Numéro de pièce d'identité
-  rc        String?  // Registre de commerce
-  patente   String?  // Numéro de patente
-  iceNumber String?  // Numéro ICE
-  status    ClientStatus @default(ACTIVE)
-
+  id              String      @id @default(cuid())
+  // Identification
+  raisonSociale   String
+  type            ClientType
+  // Identifiants fiscaux/légaux
+  if_number       String?     // Identifiant Fiscal
+  ice             String?     // Identifiant Commun Entreprise
+  rc              String?     // Registre de Commerce
+  cnss            String?     // N° CNSS
+  patente         String?     // Taxe Professionnelle
+  // Coordonnées
+  email           String?
+  phone           String?
+  address         String?
+  city            String?
+  // Régimes
+  regimeFiscal    RegimeFiscal
+  regimeTVA       RegimeTVA   @default(EXONERE)
+  // Statut
+  status          ClientStatus @default(ACTIF)
+  dateDebutActivite DateTime?
   // Relations
-  cabinet    Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
-  cabinetId  String
-  declarations Declaration[]
+  cabinet         Cabinet     @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  cabinetId       String
+  responsable     User?       @relation(fields: [responsableId], references: [id])
+  responsableId   String?
+
+  obligations     ClientObligation[]
+  juridicalFiles  JuridicalFile[]
+  invoices        Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([cabinetId])
+  @@index([responsableId])
+}
+
+enum ClientType {
+  PERSONNE_MORALE
+  PERSONNE_PHYSIQUE
+  ASSOCIATION
+  AUTO_ENTREPRENEUR
+}
+
+enum RegimeFiscal {
+  IS    // Impôt sur les Sociétés
+  IR    // Impôt sur le Revenu
+  CPU   // Contribution Professionnelle Unique
+}
+
+enum RegimeTVA {
+  MENSUEL
+  TRIMESTRIEL
+  EXONERE
 }
 
 enum ClientStatus {
-  ACTIVE
-  INACTIVE
-  ARCHIVED
+  ACTIF
+  SUSPENDU
+  RESILIE
 }
 
-// Déclarations fiscales
-model Declaration {
-  id           String   @id @default(cuid())
-  type         DeclarationType
-  year         Int
-  quarter      Int?     // Pour la TVA
-  status       DeclarationStatus @default(DRAFT)
+// ─── Référentiel des obligations ──────────────────────────────────────────────
+model ObligationRef {
+  id            String            @id @default(cuid())
+  code          String            @unique
+  libelle       String
+  categorie     ObligationCategorie
+  periodicite   Periodicite
+  regleEcheance String            // ex: "fin du mois suivant", "31 mars"
+  regimesCibles RegimeFiscal[]
+  tvaCibles     RegimeTVA[]
+  baseLegale    String?           // article CGI, etc.
+  description   String?
+  isActive      Boolean           @default(true)
 
-  // Données fiscales
-  data         Json     // Données flexibles pour différents types de déclarations
+  cabinet       Cabinet?          @relation(fields: [cabinetId], references: [id])
+  cabinetId     String?           // null = obligation système globale
 
-  // Relations
-  cabinet      Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
-  cabinetId    String
-  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientId     String
+  clientObligations ClientObligation[]
 
-  // Audit
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  submittedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categorie])
+  @@index([periodicite])
+}
+
+enum ObligationCategorie {
+  FISCALE
+  SOCIALE
+  JURIDIQUE
+  COMPTABLE
+}
+
+enum Periodicite {
+  MENSUELLE
+  TRIMESTRIELLE
+  SEMESTRIELLE
+  ANNUELLE
+  PONCTUELLE
+}
+
+// ─── Obligations générées par client ─────────────────────────────────────────
+model ClientObligation {
+  id              String              @id @default(cuid())
+  // Référence
+  obligation      ObligationRef       @relation(fields: [obligationRefId], references: [id])
+  obligationRefId String
+  client          Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId        String
+  // Période
+  periode         String              // ex: "2026-01", "2026-Q1", "2026"
+  dateEcheance    DateTime
+  // Suivi
+  statut          ObligationStatut    @default(A_FAIRE)
+  dateDepot       DateTime?
+  datePaiement    DateTime?
+  montant         Float?
+  reference       String?             // référence bordereau
+  // Responsable
+  responsable     User?               @relation(fields: [responsableId], references: [id])
+  responsableId   String?
+  // Notes
+  notes           String?
+  joursRetard     Int?                // calculé automatiquement
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, obligationRefId, periode])
+  @@index([clientId])
+  @@index([statut])
+  @@index([dateEcheance])
+}
+
+enum ObligationStatut {
+  A_FAIRE
+  EN_COURS
+  DEPOSE
+  PAYE
+  EN_RETARD
+  NON_APPLICABLE
+}
+
+// ─── Alertes / Notifications ──────────────────────────────────────────────────
+model Alert {
+  id          String      @id @default(cuid())
+  type        AlertType
+  message     String
+  isRead      Boolean     @default(false)
+  clientId    String?
+  obligationId String?
+
+  cabinetId   String
+
+  createdAt   DateTime    @default(now())
 
   @@index([cabinetId])
+  @@index([isRead])
+}
+
+enum AlertType {
+  ECHEANCE_J7
+  ECHEANCE_J3
+  RETARD
+  DOSSIER_INCOMPLET
+  IMPAYE_HONORAIRES
+  INFO
+}
+
+// ─── Module Juridique ─────────────────────────────────────────────────────────
+model JuridicalFile {
+  id          String          @id @default(cuid())
+  type        JuridicalType
+  description String?
+  statut      JuridicalStatut @default(EN_COURS)
+  dateDepot   DateTime?
+  dateFinPrevue DateTime?
+  tribunal    String?
+  numero      String?         // numéro dossier tribunal
+  documents   String[]        // URLs docs
+
+  client      Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId    String
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
   @@index([clientId])
-  @@unique([clientId, type, year, quarter])
 }
 
-enum DeclarationType {
-  IS      // Impôt sur les sociétés
-  IR      // Impôt sur le revenu
-  TVA     // Taxe sur la valeur ajoutée
+enum JuridicalType {
+  CREATION_SOCIETE
+  MODIFICATION
+  RADIATION
+  DEPOT_TRIBUNAL
+  ANNONCE_LEGALE
+  AUTRE
 }
 
-enum DeclarationStatus {
-  DRAFT
-  COMPLETED
-  SUBMITTED
-  APPROVED
-  REJECTED
+enum JuridicalStatut {
+  EN_COURS
+  COMPLETE
+  EN_ATTENTE
+  ANNULE
+}
+
+// ─── Module Facturation Cabinet ───────────────────────────────────────────────
+model Invoice {
+  id          String        @id @default(cuid())
+  numero      String        @unique
+  montant     Float
+  tva         Float         @default(0.20)
+  totalTTC    Float
+  statut      InvoiceStatut @default(EN_ATTENTE)
+  dateEmission DateTime     @default(now())
+  dateEcheance DateTime
+  datePaiement DateTime?
+  description String?
+
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId    String
+  cabinet     Cabinet       @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  cabinetId   String
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([clientId])
+  @@index([cabinetId])
+  @@index([statut])
+}
+
+enum InvoiceStatut {
+  EN_ATTENTE
+  PAYE
+  EN_RETARD
+  ANNULE
 }
